@@ -1,0 +1,109 @@
+#!/bin/python
+import sys, os, argparse
+from dataclasses import dataclass
+
+
+@dataclass
+class Result:
+    index: int
+    score: int
+    perfect: int
+    out: str
+
+
+def ansi(x, y):
+    return f"\x1b[{x}m" + y + "\x1b[0m"
+
+
+GRAY = 90
+GREEN = 32
+YELLOW = 33
+MAGENTA = 35
+
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument("pattern")
+parser.add_argument("file", nargs="*")
+parser.add_argument(
+    "-t",
+    "--threshold",
+    dest="threshold",
+    help="The threshold for a pattern to match (0-1)",
+    type=float,
+    default="0",
+)
+
+args = parser.parse_args()
+
+l_pattern = len(args.pattern)
+names = len(args.file) > 1
+
+
+def score(i, word):
+    s = 0
+    g = 0
+    out = []
+
+    counts = {}
+    for char in args.pattern:
+        counts.setdefault(char, 0)
+        counts[char] += 1
+
+    for a, b in zip(args.pattern, word):
+        if a == b:
+            s += 3
+            g += 1
+            out.append(ansi(GREEN, b))
+        elif b in args.pattern and counts[b] > 0:
+            s += 1
+            counts[b] -= 1
+            out.append(ansi(YELLOW, b))
+        else:
+            out.append(ansi(GRAY, b))
+
+    return Result(i, s, g, "".join(out))
+
+
+for file in args.file:
+
+    if not os.path.exists(file):
+        print(f"grepple: {file}: No such file or directory")
+
+    elif os.path.isfile(file):
+        matches = []
+
+        with open(file, "r") as f:
+            for lno, line in enumerate(f.readlines()):
+                results = []
+                for i in range(len(line) - l_pattern):
+                    results.append(score(i, line[i : i + l_pattern]))
+
+                results.sort(key=lambda r: r.score)
+                if results:
+                    if len(results) > 1:
+                        best = sorted(
+                            sorted(
+                                filter(lambda r: r.score == results[-1].score, results),
+                                key=lambda r: r.perfect,
+                            ),
+                            key=lambda r: r.index,
+                        )[0]
+                    else:
+                        best = results[0]
+
+                    if best.score >= (l_pattern * 3 * args.threshold):
+                        matches.append(
+                            f"{lno}: "
+                            + ansi(GRAY, line[: best.index])
+                            + "["
+                            + best.out
+                            + "]"
+                            + ansi(GRAY, line[best.index + l_pattern :])
+                        )
+
+        if names and matches:
+            print(ansi(MAGENTA, file))
+
+        for m in matches:
+            print(m, end="")
