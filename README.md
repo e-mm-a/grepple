@@ -1,6 +1,6 @@
 # grepple
 
-`grepple` is a UNIX tool to search for ~~patterns~~ strings in lines of a file, similar to `grep`.
+`grepple` is a UNIX tool to search for ~~patterns~~ strings in lines of a file, similar to `grep`, but with a Wordle flavored output.
 
 <img src="https://raw.githubusercontent.com/e-mm-a/grepple/main/images/example.png">
 
