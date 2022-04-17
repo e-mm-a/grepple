@@ -3,26 +3,96 @@ import sys, os, argparse
 from dataclasses import dataclass
 
 
+class Ansi:
+    GRAY = 90
+    GREEN = 32
+    YELLOW = 33
+    MAGENTA = 35
+
+    @staticmethod
+    def color(text: str, color: int) -> str:
+        return f"\x1b[{color}m{text}\x1b[0m"
+
+
 @dataclass
-class Result:
+class Pattern:
+    string: str
+    length: int
+
+
+@dataclass
+class Match:
     index: int
     score: int
     perfect: int
-    out: str
+    pretty: str
 
 
-def ansi(x, y):
-    return f"\x1b[{x}m" + y + "\x1b[0m"
+def match_substr(substr: str, pattern: Pattern) -> Match:
+    score = 0
+    perfect = 0
+    pretty = []
+
+    counts: dict[str, int] = {}
+    for char in pattern.string:
+        counts.setdefault(char, 0)
+        counts[char] += 1
+
+    # Perfect matches have a weight of 3, partial matches 1.
+    # Also ensure that duplicate characters respect Wordle rules for
+    # only being counted as partial as many times as that char appears
+    # in the source word.
+    for a, b in zip(pattern.string, substr):
+        if a == b:
+            score += 3
+            perfect += 1
+            pretty.append(Ansi.color(b, Ansi.GREEN))
+        elif b in counts and counts[b] > 0:
+            score += 1
+            counts[b] -= 1
+            pretty.append(Ansi.color(b, Ansi.YELLOW))
+        else:
+            pretty.append(Ansi.color(b, Ansi.GRAY))
+
+    return Match(0, score, perfect, "".join(pretty))
 
 
-GRAY = 90
-GREEN = 32
-YELLOW = 33
-MAGENTA = 35
+def best_match(matches: list[Match]) -> Match | None:
+
+    if not matches:
+        return None
+
+    if len(matches) == 1:
+        return matches[0]
+
+    # Sort by score initially
+    matches.sort(key=lambda m: m.score)
+    # Remove any scores that arent tied with the best
+    filtered = filter(lambda m: m.score == matches[-1].score, matches)
+    # Then sort by number of perfect letters
+    matches = sorted(filtered, key=lambda r: r.perfect)
+    # Finally sort by index to break ties
+    matches = sorted(matches, key=lambda r: r.index)
+
+    return matches[0]
+
+
+def match_line(lno: int, line: str, pattern: Pattern) -> Match | None:
+    matches = []
+
+    # !!! This is incredibly slow and bad !!!
+    # Theres probably a way that isn't O(n²) by not taking every
+    # substring of every line, but I'm lazy.
+    for i in range(len(line) - pattern.length):
+        substr = line[i : i + pattern.length]
+        m = match_substr(substr, pattern)
+        m.index = i
+        matches.append(m)
+
+    return best_match(matches)
 
 
 parser = argparse.ArgumentParser()
-
 parser.add_argument("pattern")
 parser.add_argument("file", nargs="*")
 parser.add_argument(
@@ -36,74 +106,38 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-l_pattern = len(args.pattern)
-names = len(args.file) > 1
-
-
-def score(i, word):
-    s = 0
-    g = 0
-    out = []
-
-    counts = {}
-    for char in args.pattern:
-        counts.setdefault(char, 0)
-        counts[char] += 1
-
-    for a, b in zip(args.pattern, word):
-        if a == b:
-            s += 3
-            g += 1
-            out.append(ansi(GREEN, b))
-        elif b in args.pattern and counts[b] > 0:
-            s += 1
-            counts[b] -= 1
-            out.append(ansi(YELLOW, b))
-        else:
-            out.append(ansi(GRAY, b))
-
-    return Result(i, s, g, "".join(out))
+pattern = Pattern(args.pattern, len(args.pattern))
 
 
 for file in args.file:
 
     if not os.path.exists(file):
         print(f"grepple: {file}: No such file or directory")
+        continue
 
-    elif os.path.isfile(file):
-        matches = []
+    elif not os.path.isfile(file):
+        continue
 
-        with open(file, "r") as f:
-            for lno, line in enumerate(f.readlines()):
-                results = []
-                for i in range(len(line) - l_pattern):
-                    results.append(score(i, line[i : i + l_pattern]))
+    match_strings = []
 
-                results.sort(key=lambda r: r.score)
-                if results:
-                    if len(results) > 1:
-                        best = sorted(
-                            sorted(
-                                filter(lambda r: r.score == results[-1].score, results),
-                                key=lambda r: r.perfect,
-                            ),
-                            key=lambda r: r.index,
-                        )[0]
-                    else:
-                        best = results[0]
+    with open(file, "r") as f:
+        for lno, line in enumerate(f.readlines()):
+            best = match_line(lno, line, pattern)
 
-                    if best.score >= (l_pattern * 3 * args.threshold):
-                        matches.append(
-                            f"{lno}: "
-                            + ansi(GRAY, line[: best.index])
-                            + "["
-                            + best.out
-                            + "]"
-                            + ansi(GRAY, line[best.index + l_pattern :])
-                        )
+            # A score of `pattern.length * 3` is equal to a full match,
+            # so multiply by threshold to get the final threshold score.
+            if best and best.score >= pattern.length * 3 * args.threshold:
+                match_strings.append(
+                    f"{lno+1}: "
+                    + Ansi.color(line[: best.index], Ansi.GRAY)
+                    + "["
+                    + best.pretty
+                    + "]"
+                    + Ansi.color(line[best.index + pattern.length :], Ansi.GRAY)
+                )
 
-        if names and matches:
-            print(ansi(MAGENTA, file))
+    if len(args.file) > 1 and match_strings:
+        print(Ansi.color(file, Ansi.MAGENTA))
 
-        for m in matches:
-            print(m, end="")
+    for m in match_strings:
+        print(m, end="")
