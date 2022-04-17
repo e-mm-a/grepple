@@ -38,14 +38,18 @@ def match_substr(substr: str, pattern: Pattern) -> Match:
         counts.setdefault(char, 0)
         counts[char] += 1
 
-    # Perfect matches have a weight of 3, partial matches 1.
-    # Also ensure that duplicate characters respect Wordle rules for
+    # Perfect matches have a weight of 3
+    for a, b in zip(pattern.string, substr):
+        if a == b:
+            score += 3
+            counts[b] -= 1
+            perfect += 1
+
+    # Ensure that duplicate characters respect Wordle rules for
     # only being counted as partial as many times as that char appears
     # in the source word.
     for a, b in zip(pattern.string, substr):
         if a == b:
-            score += 3
-            perfect += 1
             pretty.append(Ansi.color(b, Ansi.GREEN))
         elif b in counts and counts[b] > 0:
             score += 1
@@ -101,7 +105,7 @@ parser.add_argument(
     dest="threshold",
     help="The threshold for a pattern to match (0-1)",
     type=float,
-    default="0",
+    default="0.5",
 )
 
 args = parser.parse_args()
